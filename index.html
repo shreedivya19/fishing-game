@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fishing Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(to bottom, #87CEEB 0%, #4682B4 50%, #1e3a8a 100%);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(to bottom, #87CEEB 0%, #4682B4 30%, #1e40af 70%, #0f172a 100%);
+            cursor: crosshair;
+        }
+
+        .ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+
+        .shop {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            min-width: 200px;
+        }
+
+        .upgrade-btn {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px;
+            background: #4ade80;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .upgrade-btn:hover {
+            background: #22c55e;
+            transform: translateY(-2px);
+        }
+
+        .upgrade-btn:disabled {
+            background: #6b7280;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-align: center;
+            font-size: 16px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+
+        .catch-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            font-size: 24px;
+            z-index: 100;
+            animation: popupFade 2s ease-out forwards;
+        }
+
+        @keyframes popupFade {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+            20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+            80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        @keyframes wave {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-3px); }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="1200" height="800"></canvas>
+    
+    <div class="ui">
+        <div>💰 Coins: <span id="coins">0</span></div>
+        <div>🎣 Catches: <span id="catches">0</span></div>
+        <div>⭐ Score: <span id="score">0</span></div>
+    </div>
+
+    <div class="shop">
+        <h3>🛒 Upgrades</h3>
+        <button class="upgrade-btn" id="hookSpeedBtn">
+            ⚡ Hook Speed - $<span id="hookSpeedCost">50</span>
+        </button>
+        <button class="upgrade-btn" id="netSizeBtn">
+            🕸️ Bigger Net - $<span id="netSizeCost">100</span>
+        </button>
+        <button class="upgrade-btn" id="luckBtn">
+            🍀 Better Luck - $<span id="luckCost">200</span>
+        </button>
+        <button class="upgrade-btn" id="magnetBtn">
+            🧲 Fish Magnet - $<span id="magnetCost">500</span>
+        </button>
+    </div>
+
+    <div class="instructions">
+        Click anywhere to drop your hook! 🎣 Catch fish to earn coins and buy upgrades!
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game state
+        let gameState = {
+            coins: 0,
+            catches: 0,
+            score: 0,
+            hookSpeed: 3,
+            netSize: 1,
+            luck: 1,
+            magnetPower: 0,
+            upgradeCosts: {
+                hookSpeed: 50,
+                netSize: 100,
+                luck: 200,
+                magnet: 500
+            }
+        };
+
+        // Game objects
+        let boat = { x: canvas.width / 2 - 50, y: 50, width: 100, height: 40, bobOffset: 0 };
+        let hook = { x: 0, y: 0, active: false, dropping: false, rising: false, speed: 3, hasFish: null };
+        let fish = [];
+        let particles = [];
+        let powerUps = [];
+
+        // Fish types
+        const fishTypes = [
+            { name: 'Minnow', color: '#silver', size: 15, value: 5, rarity: 0.5, speed: 2 },
+            { name: 'Bass', color: '#228B22', size: 25, value: 15, rarity: 0.3, speed: 1.5 },
+            { name: 'Salmon', color: '#FFA500', size: 35, value: 35, rarity: 0.15, speed: 1 },
+            { name: 'Tuna', color: '#4169E1', size: 45, value: 75, rarity: 0.04, speed: 0.8 },
+            { name: 'Golden Fish', color: '#FFD700', size: 30, value: 200, rarity: 0.01, speed: 3 }
+        ];
+
+        // Initialize fish
+        function spawnFish() {
+            if (fish.length < 15) {
+                const type = getRandomFishType();
+                fish.push({
+                    ...type,
+                    x: Math.random() * canvas.width,
+                    y: 200 + Math.random() * (canvas.height - 300),
+                    vx: (Math.random() - 0.5) * type.speed,
+                    vy: (Math.random() - 0.5) * 0.5,
+                    caught: false,
+                    wiggle: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        function getRandomFishType() {
+            const rand = Math.random() * gameState.luck;
+            let cumulative = 0;
+            for (let type of fishTypes) {
+                cumulative += type.rarity;
+                if (rand <= cumulative) return { ...type };
+            }
+            return { ...fishTypes[0] };
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            // Update boat bobbing
+            boat.bobOffset = Math.sin(Date.now() * 0.003) * 5;
+
+            // Update fish
+            fish.forEach(f => {
+                if (!f.caught) {
+                    f.x += f.vx;
+                    f.y += f.vy;
+                    f.wiggle += 0.1;
+
+                    // Bounce off walls
+                    if (f.x <= 0 || f.x >= canvas.width) f.vx *= -1;
+                    if (f.y <= 150 || f.y >= canvas.height - 50) f.vy *= -1;
+
+                    // Magnet effect
+                    if (gameState.magnetPower > 0 && hook.active) {
+                        const dx = hook.x - f.x;
+                        const dy = hook.y - f.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 100 * gameState.magnetPower) {
+                            f.x += dx * 0.02 * gameState.magnetPower;
+                            f.y += dy * 0.02 * gameState.magnetPower;
+                        }
+                    }
+                }
+            });
+
+            // Update hook
+            if (hook.active) {
+                if (hook.dropping) {
+                    hook.y += hook.speed;
+                    if (hook.y >= canvas.height - 50) {
+                        hook.dropping = false;
+                        hook.rising = true;
+                    }
+
+                    // Check fish collision
+                    if (!hook.hasFish) {
+                        fish.forEach(f => {
+                            if (!f.caught) {
+                                const dx = hook.x - f.x;
+                                const dy = hook.y - f.y;
+                                const dist = Math.sqrt(dx * dx + dy * dy);
+                                const catchRadius = f.size * gameState.netSize + 10;
+                                
+                                if (dist < catchRadius) {
+                                    f.caught = true;
+                                    hook.hasFish = f;
+                                    hook.dropping = false;
+                                    hook.rising = true;
+                                    createParticles(f.x, f.y, f.color);
+                                }
+                            }
+                        });
+                    }
+                }
+
+                if (hook.rising) {
+                    hook.y -= hook.speed;
+                    if (hook.hasFish) {
+                        hook.hasFish.x = hook.x;
+                        hook.hasFish.y = hook.y + 20;
+                    }
+                    
+                    if (hook.y <= boat.y + 50) {
+                        if (hook.hasFish) {
+                            catchFish(hook.hasFish);
+                            hook.hasFish = null;
+                        }
+                        hook.active = false;
+                        hook.rising = false;
+                    }
+                }
+            }
+
+            // Update particles
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.2;
+                p.life--;
+                return p.life > 0;
+            });
+
+            // Remove caught fish
+            fish = fish.filter(f => !f.caught || f === hook.hasFish);
+
+            // Spawn new fish
+            if (Math.random() < 0.02) spawnFish();
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw water waves
+            drawWaves();
+
+            // Draw fish
+            fish.forEach(drawFish);
+
+            // Draw particles
+            particles.forEach(drawParticle);
+
+            // Draw boat
+            drawBoat();
+
+            // Draw hook and line
+            if (hook.active) {
+                drawHookAndLine();
+            }
+        }
+
+        function drawWaves() {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            const time = Date.now() * 0.002;
+            
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                const y = 100 + i * 30;
+                for (let x = 0; x <= canvas.width; x += 20) {
+                    const waveY = y + Math.sin(x * 0.02 + time + i) * 5;
+                    if (x === 0) ctx.moveTo(x, waveY);
+                    else ctx.lineTo(x, waveY);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function drawBoat() {
+            ctx.save();
+            ctx.translate(boat.x, boat.y + boat.bobOffset);
+            
+            // Hull
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, 0, boat.width, boat.height);
+            
+            // Bow
+            ctx.beginPath();
+            ctx.moveTo(boat.width, 0);
+            ctx.lineTo(boat.width + 20, boat.height / 2);
+            ctx.lineTo(boat.width, boat.height);
+            ctx.fill();
+            
+            // Cabin
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(20, -20, 40, 20);
+            
+            // Flag
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(65, -35, 20, 15);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(65, -35);
+            ctx.lineTo(65, -10);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function drawHookAndLine() {
+            // Fishing line
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(boat.x + 50, boat.y + boat.bobOffset + 20);
+            ctx.lineTo(hook.x, hook.y);
+            ctx.stroke();
+
+            // Hook
+            ctx.fillStyle = '#C0C0C0';
+            ctx.beginPath();
+            ctx.arc(hook.x, hook.y, 5 * gameState.netSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Net effect
+            if (gameState.netSize > 1) {
+                ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(hook.x, hook.y, 20 * gameState.netSize, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        function drawFish(fish) {
+            ctx.save();
+            ctx.translate(fish.x, fish.y);
+            ctx.rotate(Math.sin(fish.wiggle) * 0.1);
+            
+            // Body
+            ctx.fillStyle = fish.color;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, fish.size, fish.size * 0.6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Tail
+            ctx.beginPath();
+            ctx.moveTo(-fish.size, 0);
+            ctx.lineTo(-fish.size - 10, -fish.size * 0.3);
+            ctx.lineTo(-fish.size - 10, fish.size * 0.3);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Eye
+            ctx.fillStyle = '#FFF';
+            ctx.beginPath();
+            ctx.arc(fish.size * 0.3, -fish.size * 0.2, fish.size * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(fish.size * 0.35, -fish.size * 0.2, fish.size * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+        }
+
+        function drawParticle(particle) {
+            ctx.fillStyle = `rgba(${particle.r}, ${particle.g}, ${particle.b}, ${particle.life / 30})`;
+            ctx.beginPath();
+            ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function createParticles(x, y, color) {
+            const colors = {
+                '#silver': [192, 192, 192],
+                '#228B22': [34, 139, 34],
+                '#FFA500': [255, 165, 0],
+                '#4169E1': [65, 105, 225],
+                '#FFD700': [255, 215, 0]
+            };
+            const [r, g, b] = colors[color] || [255, 255, 255];
+
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6 - 2,
+                    r, g, b,
+                    size: Math.random() * 3 + 1,
+                    life: 30
+                });
+            }
+        }
+
+        function catchFish(fish) {
+            gameState.coins += fish.value;
+            gameState.catches++;
+            gameState.score += fish.value * 10;
+            
+            updateUI();
+            showCatchPopup(fish);
+        }
+
+        function showCatchPopup(fish) {
+            const popup = document.createElement('div');
+            popup.className = 'catch-popup';
+            popup.innerHTML = `
+                🎉 Caught ${fish.name}! 🎉<br>
+                +$${fish.value} coins!
+            `;
+            document.body.appendChild(popup);
+            
+            setTimeout(() => {
+                popup.remove();
+            }, 2000);
+        }
+
+        function updateUI() {
+            document.getElementById('coins').textContent = gameState.coins;
+            document.getElementById('catches').textContent = gameState.catches;
+            document.getElementById('score').textContent = gameState.score;
+            
+            // Update upgrade buttons
+            updateUpgradeButtons();
+        }
+
+        function updateUpgradeButtons() {
+            const buttons = {
+                hookSpeedBtn: { cost: gameState.upgradeCosts.hookSpeed, level: Math.floor(gameState.hookSpeed - 2) },
+                netSizeBtn: { cost: gameState.upgradeCosts.netSize, level: Math.floor((gameState.netSize - 1) * 2) },
+                luckBtn: { cost: gameState.upgradeCosts.luck, level: Math.floor((gameState.luck - 1) * 2) },
+                magnetBtn: { cost: gameState.upgradeCosts.magnet, level: gameState.magnetPower }
+            };
+
+            Object.entries(buttons).forEach(([id, data]) => {
+                const btn = document.getElementById(id);
+                btn.disabled = gameState.coins < data.cost;
+                if (data.level > 0) {
+                    btn.style.background = '#f59e0b';
+                    btn.innerHTML = btn.innerHTML.replace(/Level \d+/, '') + ` (Level ${data.level})`;
+                }
+            });
+        }
+
+        // Event listeners
+        canvas.addEventListener('click', (e) => {
+            if (!hook.active) {
+                const rect = canvas.getBoundingClientRect();
+                hook.x = e.clientX - rect.left;
+                hook.y = boat.y + boat.bobOffset + 50;
+                hook.active = true;
+                hook.dropping = true;
+                hook.speed = gameState.hookSpeed;
+            }
+        });
+
+        // Upgrade buttons
+        document.getElementById('hookSpeedBtn').addEventListener('click', () => {
+            if (gameState.coins >= gameState.upgradeCosts.hookSpeed) {
+                gameState.coins -= gameState.upgradeCosts.hookSpeed;
+                gameState.hookSpeed += 1;
+                gameState.upgradeCosts.hookSpeed = Math.floor(gameState.upgradeCosts.hookSpeed * 1.5);
+                document.getElementById('hookSpeedCost').textContent = gameState.upgradeCosts.hookSpeed;
+                updateUI();
+            }
+        });
+
+        document.getElementById('netSizeBtn').addEventListener('click', () => {
+            if (gameState.coins >= gameState.upgradeCosts.netSize) {
+                gameState.coins -= gameState.upgradeCosts.netSize;
+                gameState.netSize += 0.5;
+                gameState.upgradeCosts.netSize = Math.floor(gameState.upgradeCosts.netSize * 1.5);
+                document.getElementById('netSizeCost').textContent = gameState.upgradeCosts.netSize;
+                updateUI();
+            }
+        });
+
+        document.getElementById('luckBtn').addEventListener('click', () => {
+            if (gameState.coins >= gameState.upgradeCosts.luck) {
+                gameState.coins -= gameState.upgradeCosts.luck;
+                gameState.luck += 0.5;
+                gameState.upgradeCosts.luck = Math.floor(gameState.upgradeCosts.luck * 1.5);
+                document.getElementById('luckCost').textContent = gameState.upgradeCosts.luck;
+                updateUI();
+            }
+        });
+
+        document.getElementById('magnetBtn').addEventListener('click', () => {
+            if (gameState.coins >= gameState.upgradeCosts.magnet) {
+                gameState.coins -= gameState.upgradeCosts.magnet;
+                gameState.magnetPower += 1;
+                gameState.upgradeCosts.magnet = Math.floor(gameState.upgradeCosts.magnet * 2);
+                document.getElementById('magnetCost').textContent = gameState.upgradeCosts.magnet;
+                updateUI();
+            }
+        });
+
+        // Initialize game
+        for (let i = 0; i < 8; i++) spawnFish();
+        updateUI();
+        gameLoop();
+    </script>
+</body>
+</html>
