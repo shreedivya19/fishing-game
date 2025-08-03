@@ -29,4 +29,4 @@ A fun HTML5 Canvas fishing game with upgrades, animations, and multiple fish typ
 - Works on desktop and mobile devices
 
 ---
-Made with ❤️ by [Your Name]
+Made with ❤️ by Shree Divya N
